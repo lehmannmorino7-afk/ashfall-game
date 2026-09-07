@@ -1,266 +1,713 @@
 'use client';
 
-import { Canvas, useFrame } from "@react-three/fiber";
-import { Environment, Sky } from "@react-three/drei";
-import { useEffect, useMemo, useRef, useState } from "react";
-import * as THREE from "three";
+import { Canvas, useFrame } from '@react-three/fiber';
+import { Environment, Sky, useGLTF } from '@react-three/drei';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
 
-function Tree({ position, onCollect }) {
-  const [collected, setCollected] = useState(false);
-  if (collected) return null;
+
+/* =========================================
+   GLB MODEL
+========================================= */
+
+function Model({
+  url,
+  position = [0, 0, 0],
+  rotation = [0, 0, 0],
+  scale = 1,
+}) {
+  const { scene } = useGLTF(url);
+
+  const model = useMemo(() => {
+    return scene.clone(true);
+  }, [scene]);
+
+  useEffect(() => {
+    model.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+  }, [model]);
 
   return (
-    <group
+    <primitive
+      object={model}
       position={position}
-      onClick={(event) => {
-        event.stopPropagation();
-        setCollected(true);
-        onCollect("wood", 2);
-      }}
-    >
-      <mesh position={[0, 1.7, 0]} castShadow>
-        <cylinderGeometry args={[0.22, 0.38, 3.4, 10]} />
-        <meshStandardMaterial color="#4b3426" roughness={1} />
-      </mesh>
-      <mesh position={[0, 3.7, 0]} castShadow>
-        <coneGeometry args={[1.6, 3.8, 12]} />
-        <meshStandardMaterial color="#243b27" roughness={0.95} />
-      </mesh>
-      <mesh position={[0.35, 4.7, 0.1]} castShadow>
-        <coneGeometry args={[1.25, 2.8, 12]} />
-        <meshStandardMaterial color="#2c4a30" roughness={0.95} />
-      </mesh>
-    </group>
+      rotation={rotation}
+      scale={scale}
+    />
   );
 }
 
-function Rock({ position, onCollect }) {
-  const [collected, setCollected] = useState(false);
-  if (collected) return null;
 
-  return (
-    <mesh
-      position={position}
-      castShadow
-      onClick={(event) => {
-        event.stopPropagation();
-        setCollected(true);
-        onCollect("stone", 2);
-      }}
-    >
-      <dodecahedronGeometry args={[0.85, 1]} />
-      <meshStandardMaterial color="#565b56" roughness={1} />
-    </mesh>
-  );
-}
+/* =========================================
+   SPIELER
+========================================= */
 
-function Player({ move }) {
-  const ref = useRef();
+function Player({ move, playerPosition }) {
+  const playerRef = useRef();
   const keys = useRef({});
 
   useEffect(() => {
-    const down = (e) => { keys.current[e.code] = true; };
-    const up = (e) => { keys.current[e.code] = false; };
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
-    return () => {
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
+
+    const keyDown = (event) => {
+      keys.current[event.code] = true;
     };
+
+    const keyUp = (event) => {
+      keys.current[event.code] = false;
+    };
+
+    window.addEventListener('keydown', keyDown);
+    window.addEventListener('keyup', keyUp);
+
+    return () => {
+      window.removeEventListener('keydown', keyDown);
+      window.removeEventListener('keyup', keyUp);
+    };
+
   }, []);
 
-  useFrame((state, delta) => {
-    if (!ref.current) return;
 
-    const inputX =
+  useFrame((state, delta) => {
+
+    if (!playerRef.current) return;
+
+
+    const x =
       (keys.current.KeyD ? 1 : 0) -
       (keys.current.KeyA ? 1 : 0) +
       (move.right ? 1 : 0) -
       (move.left ? 1 : 0);
 
-    const inputZ =
+
+    const z =
       (keys.current.KeyS ? 1 : 0) -
       (keys.current.KeyW ? 1 : 0) +
       (move.down ? 1 : 0) -
       (move.up ? 1 : 0);
 
-    if (inputX || inputZ) {
-      const direction = new THREE.Vector3(inputX, 0, inputZ)
-        .normalize()
-        .applyQuaternion(state.camera.quaternion);
-      direction.y = 0;
+
+    if (x !== 0 || z !== 0) {
+
+      const direction = new THREE.Vector3(x, 0, z);
+
       direction.normalize();
 
-      ref.current.position.addScaledVector(direction, 4.5 * delta);
-      ref.current.position.x = THREE.MathUtils.clamp(ref.current.position.x, -18, 18);
-      ref.current.position.z = THREE.MathUtils.clamp(ref.current.position.z, -18, 18);
-      ref.current.rotation.y = Math.atan2(direction.x, direction.z);
+
+      playerRef.current.position.x +=
+        direction.x * 5 * delta;
+
+      playerRef.current.position.z +=
+        direction.z * 5 * delta;
+
+
+      playerRef.current.position.x =
+        THREE.MathUtils.clamp(
+          playerRef.current.position.x,
+          -20,
+          20
+        );
+
+
+      playerRef.current.position.z =
+        THREE.MathUtils.clamp(
+          playerRef.current.position.z,
+          -20,
+          20
+        );
+
+
+      playerRef.current.rotation.y =
+        Math.atan2(
+          direction.x,
+          direction.z
+        );
+
     }
 
-    const target = new THREE.Vector3(
-      ref.current.position.x,
-      ref.current.position.y + 5,
-      ref.current.position.z + 8
+
+    playerPosition.current.copy(
+      playerRef.current.position
     );
 
-    state.camera.position.lerp(target, 0.06);
-    state.camera.lookAt(
-      ref.current.position.x,
-      ref.current.position.y + 1.4,
-      ref.current.position.z
+
+    /* KAMERA FOLGT DEM SPIELER */
+
+    const cameraTarget = new THREE.Vector3(
+      playerRef.current.position.x,
+      6,
+      playerRef.current.position.z + 9
     );
+
+
+    state.camera.position.lerp(
+      cameraTarget,
+      0.05
+    );
+
+
+    state.camera.lookAt(
+      playerRef.current.position.x,
+      1.5,
+      playerRef.current.position.z
+    );
+
   });
 
-  return (
-    <group ref={ref} position={[0, 0, 9]}>
-      <mesh position={[0, 1.05, 0]} castShadow>
-        <capsuleGeometry args={[0.38, 1.2, 8, 16]} />
-        <meshStandardMaterial color="#303a3c" roughness={0.82} />
-      </mesh>
-      <mesh position={[0, 2.15, 0]} castShadow>
-        <sphereGeometry args={[0.31, 20, 20]} />
-        <meshStandardMaterial color="#b58b70" roughness={0.9} />
-      </mesh>
-    </group>
-  );
-}
-
-function World({ onCollect, move }) {
-  const trees = useMemo(
-    () => [[-8,-9],[-5,-5],[5,-8],[9,-3],[-10,3],[-6,7],[7,7],[3,10],[-12,-11],[11,8]],
-    []
-  );
-  const rocks = useMemo(
-    () => [[-3,-1],[4,-2],[8,4],[-8,-4],[1,3],[-11,9]],
-    []
-  );
 
   return (
-    <>
-      <color attach="background" args={["#6d786f"]} />
-      <fog attach="fog" args={["#6d786f", 18, 55]} />
-      <Sky sunPosition={[8, 12, 4]} turbidity={7} rayleigh={1.1} />
-      <ambientLight intensity={0.65} />
-      <directionalLight
-        position={[8, 14, 6]}
-        intensity={2}
-        castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+
+    <group
+      ref={playerRef}
+      position={[0, 0, 8]}
+    >
+
+
+      {/* =================================
+          DEIN ECHTER CHARACTER
+      ================================= */}
+
+      <Model
+        url="/models/character-human.glb"
+        position={[0, 0, 0]}
+        rotation={[0, Math.PI, 0]}
+        scale={1}
       />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[100, 100]} />
-        <meshStandardMaterial color="#3d4a38" roughness={1} />
-      </mesh>
 
-      <mesh position={[0, 0.08, 0]} receiveShadow>
-        <boxGeometry args={[6, 0.16, 5]} />
-        <meshStandardMaterial color="#625642" roughness={1} />
-      </mesh>
+      {/* =================================
+          DEIN ECHTES SCHWERT
+      ================================= */}
 
-      <mesh position={[-2.4, 0.8, 0]} castShadow>
-        <boxGeometry args={[1.8, 1.5, 1.8]} />
-        <meshStandardMaterial color="#5d5043" />
-      </mesh>
-      <mesh position={[2.2, 0.7, -0.8]} castShadow>
-        <boxGeometry args={[1.4, 1.3, 1.4]} />
-        <meshStandardMaterial color="#645746" />
-      </mesh>
+      <Model
+        url="/models/weapon-sword.glb"
+        position={[0.45, 1.1, 0]}
+        rotation={[0, 0, -0.7]}
+        scale={0.75}
+      />
 
-      {trees.map(([x, z], index) => (
-        <Tree key={index} position={[x, 0, z]} onCollect={onCollect} />
-      ))}
 
-      {rocks.map(([x, z], index) => (
-        <Rock key={index} position={[x, 0.82, z]} onCollect={onCollect} />
-      ))}
+    </group>
 
-      <Player move={move} />
-      <Environment preset="forest" />
-    </>
   );
+
 }
 
-export default function Home() {
-  const [resources, setResources] = useState({ wood: 0, stone: 0 });
-  const [started, setStarted] = useState(false);
-  const [status, setStatus] = useState("Erkunde das Gebiet und sammle Ressourcen.");
-  const [move, setMove] = useState({ up: false, down: false, left: false, right: false });
 
-  const collect = (type, amount) => {
-    setResources((current) => ({
-      ...current,
-      [type]: current[type] + amount
-    }));
-    setStatus(type === "wood" ? `+${amount} Holz gesammelt` : `+${amount} Stein gesammelt`);
-  };
+/* =========================================
+   FELS
+========================================= */
 
-  const press = (key, value) => {
-    setMove((current) => ({ ...current, [key]: value }));
-  };
+function Rock({ position }) {
 
   return (
-    <main>
+
+    <group position={position}>
+
+      <Model
+        url="/models/rocks.glb"
+        position={[0, 0, 0]}
+        scale={0.8}
+      />
+
+    </group>
+
+  );
+
+}
+
+
+/* =========================================
+   WELT
+========================================= */
+
+function World({ move, playerPosition }) {
+
+
+  const rocks = [
+    [-7, -6],
+    [-3, -2],
+    [4, -5],
+    [8, -1],
+    [-8, 5],
+    [-2, 6],
+    [5, 7],
+    [10, 5],
+  ];
+
+
+  return (
+
+    <>
+
+      <color
+        attach="background"
+        args={['#6b786d']}
+      />
+
+
+      <fog
+        attach="fog"
+        args={['#6b786d', 20, 60]}
+      />
+
+
+      {/* HIMMEL */}
+
+      <Sky
+        sunPosition={[10, 15, 5]}
+        turbidity={8}
+        rayleigh={1}
+      />
+
+
+      {/* LICHT */}
+
+      <ambientLight intensity={0.8} />
+
+
+      <directionalLight
+        position={[10, 15, 10]}
+        intensity={2}
+        castShadow
+      />
+
+
+      {/* =================================
+          DEIN GLB BODEN
+      ================================= */}
+
+      <Model
+        url="/models/floor.glb"
+        position={[0, 0, 0]}
+        scale={12}
+      />
+
+
+      {/* NOTFALL BODEN */}
+
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
+      >
+
+        <planeGeometry
+          args={[100, 100]}
+        />
+
+        <meshStandardMaterial
+          color="#3f513c"
+        />
+
+      </mesh>
+
+
+      {/* =================================
+          HOLZ STRUKTUR
+      ================================= */}
+
+      <Model
+        url="/models/wood-structure.glb"
+        position={[-4, 0, -3]}
+        rotation={[0, 0.5, 0]}
+        scale={1}
+      />
+
+
+      {/* =================================
+          FELSEN
+      ================================= */}
+
+      {rocks.map((rock, index) => (
+
+        <Rock
+          key={index}
+          position={[
+            rock[0],
+            0,
+            rock[1]
+          ]}
+        />
+
+      ))}
+
+
+      {/* =================================
+          DEIN SPIELER
+      ================================= */}
+
+      <Player
+        move={move}
+        playerPosition={playerPosition}
+      />
+
+
+      <Environment preset="forest" />
+
+    </>
+
+  );
+
+}
+
+
+/* =========================================
+   HAUPTSPIEL
+========================================= */
+
+export default function Home() {
+
+
+  const [started, setStarted] =
+    useState(false);
+
+
+  const [move, setMove] =
+    useState({
+      up: false,
+      down: false,
+      left: false,
+      right: false,
+    });
+
+
+  const playerPosition =
+    useRef(
+      new THREE.Vector3(0, 0, 8)
+    );
+
+
+  const press = (direction, value) => {
+
+    setMove((current) => ({
+      ...current,
+      [direction]: value,
+    }));
+
+  };
+
+
+  return (
+
+    <main
+      style={{
+        width: '100vw',
+        height: '100vh',
+        overflow: 'hidden',
+        background: '#000',
+        position: 'relative',
+        touchAction: 'none',
+      }}
+    >
+
+
+      {/* =================================
+          STARTMENÜ
+      ================================= */}
+
       {!started && (
-        <section className="startScreen">
-          <div className="panel">
-            <div className="eyebrow">ASHFALL</div>
-            <h1>Version 0.1</h1>
-            <p>
-              Der erste spielbare Prototyp. Erkunde das Startgebiet,
-              sammle Holz und Stein und teste die grundlegende Bewegung.
+
+        <div
+          style={{
+            position: 'absolute',
+            zIndex: 10,
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background:
+              'linear-gradient(135deg, #111, #26352b)',
+          }}
+        >
+
+          <div
+            style={{
+              textAlign: 'center',
+              color: 'white',
+              padding: 30,
+            }}
+          >
+
+            <h1
+              style={{
+                fontSize: 48,
+                marginBottom: 10,
+              }}
+            >
+              ASHFALL
+            </h1>
+
+
+            <h2>
+              Version 0.2
+            </h2>
+
+
+            <p
+              style={{
+                color: '#ccc',
+                marginBottom: 30,
+              }}
+            >
+              Dein GLB Charakter und dein
+              GLB Schwert sind jetzt im Spiel.
             </p>
-            <button onClick={() => setStarted(true)}>Spiel starten</button>
+
+
+            <button
+              onClick={() =>
+                setStarted(true)
+              }
+              style={{
+                padding:
+                  '16px 35px',
+                fontSize: 20,
+                border: 'none',
+                borderRadius: 12,
+                background: '#5c8f55',
+                color: 'white',
+              }}
+            >
+              SPIEL STARTEN
+            </button>
+
           </div>
-        </section>
+
+        </div>
+
       )}
 
-      <div className="hud">
-        <div className="brand">ASHFALL <span>0.1</span></div>
-        <div className="inventory">
-          <div><small>HOLZ</small><strong>{resources.wood}</strong></div>
-          <div><small>STEIN</small><strong>{resources.stone}</strong></div>
+
+      {/* =================================
+          HUD
+      ================================= */}
+
+      <div
+        style={{
+          position: 'absolute',
+          top: 20,
+          left: 20,
+          zIndex: 5,
+          color: 'white',
+          fontFamily: 'Arial',
+          pointerEvents: 'none',
+        }}
+      >
+
+        <div
+          style={{
+            fontSize: 26,
+            fontWeight: 'bold',
+          }}
+        >
+          ASHFALL
         </div>
-        <div className="status">{status}</div>
+
+
+        <div
+          style={{
+            opacity: 0.7,
+          }}
+        >
+          Version 0.2
+        </div>
+
       </div>
 
-      <Canvas shadows camera={{ position: [0, 5, 16], fov: 55 }}>
-        <World onCollect={collect} move={move} />
+
+      {/* =================================
+          3D SPIEL
+      ================================= */}
+
+      <Canvas
+        shadows
+        camera={{
+          position: [0, 6, 17],
+          fov: 55,
+        }}
+      >
+
+        <World
+          move={move}
+          playerPosition={playerPosition}
+        />
+
       </Canvas>
 
-      <div className="desktopHint">
-        Desktop: W A S D zum Bewegen · Bäume und Felsen anklicken
+
+      {/* =================================
+          MOBILE STEUERUNG
+      ================================= */}
+
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 30,
+          left: 30,
+          zIndex: 5,
+        }}
+      >
+
+
+        <button
+          onPointerDown={() =>
+            press('up', true)
+          }
+
+          onPointerUp={() =>
+            press('up', false)
+          }
+
+          onPointerLeave={() =>
+            press('up', false)
+          }
+
+          style={buttonStyle}
+        >
+          ▲
+        </button>
+
+
+        <div>
+
+          <button
+            onPointerDown={() =>
+              press('left', true)
+            }
+
+            onPointerUp={() =>
+              press('left', false)
+            }
+
+            onPointerLeave={() =>
+              press('left', false)
+            }
+
+            style={buttonStyle}
+          >
+            ◀
+          </button>
+
+
+          <button
+            onPointerDown={() =>
+              press('down', true)
+            }
+
+            onPointerUp={() =>
+              press('down', false)
+            }
+
+            onPointerLeave={() =>
+              press('down', false)
+            }
+
+            style={buttonStyle}
+          >
+            ▼
+          </button>
+
+
+          <button
+            onPointerDown={() =>
+              press('right', true)
+            }
+
+            onPointerUp={() =>
+              press('right', false)
+            }
+
+            onPointerLeave={() =>
+              press('right', false)
+            }
+
+            style={buttonStyle}
+          >
+            ▶
+          </button>
+
+        </div>
+
       </div>
 
-      <div className="mobileControls">
-        <div className="pad">
-          <button
-            className="up"
-            onPointerDown={() => press("up", true)}
-            onPointerUp={() => press("up", false)}
-            onPointerLeave={() => press("up", false)}
-          >▲</button>
-          <button
-            className="left"
-            onPointerDown={() => press("left", true)}
-            onPointerUp={() => press("left", false)}
-            onPointerLeave={() => press("left", false)}
-          >◀</button>
-          <button
-            className="right"
-            onPointerDown={() => press("right", true)}
-            onPointerUp={() => press("right", false)}
-            onPointerLeave={() => press("right", false)}
-          >▶</button>
-          <button
-            className="down"
-            onPointerDown={() => press("down", true)}
-            onPointerUp={() => press("down", false)}
-            onPointerLeave={() => press("down", false)}
-          >▼</button>
-        </div>
+
+      {/* =================================
+          INFO
+      ================================= */}
+
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 20,
+          right: 20,
+          color: 'white',
+          opacity: 0.8,
+          fontFamily: 'Arial',
+          fontSize: 12,
+          zIndex: 5,
+        }}
+      >
+        WASD oder Steuerkreuz
       </div>
+
+
     </main>
+
   );
+
 }
+
+
+/* =========================================
+   BUTTON STYLE
+========================================= */
+
+const buttonStyle = {
+
+  width: 65,
+  height: 65,
+
+  margin: 4,
+
+  fontSize: 25,
+
+  borderRadius: 15,
+
+  border:
+    '2px solid rgba(255,255,255,0.3)',
+
+  background:
+    'rgba(20,20,20,0.7)',
+
+  color: 'white',
+
+};
+
+
+/* =========================================
+   MODEL PRELOAD
+========================================= */
+
+useGLTF.preload(
+  '/models/character-human.glb'
+);
+
+useGLTF.preload(
+  '/models/weapon-sword.glb'
+);
+
+useGLTF.preload(
+  '/models/rocks.glb'
+);
+
+useGLTF.preload(
+  '/models/floor.glb'
+);
+
+useGLTF.preload(
+  '/models/wood-structure.glb'
+);
