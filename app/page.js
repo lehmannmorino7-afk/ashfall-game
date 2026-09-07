@@ -5,6 +5,11 @@ import { Sky, useGLTF } from '@react-three/drei';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 
+/* =====================================================
+   ASHFALL – VERSION 0.6
+   Saubere GLB-Spielwelt
+===================================================== */
+
 
 /* =====================================================
    GLB MODELL
@@ -21,54 +26,86 @@ function GLBModel({
   const model = useMemo(() => {
     const clone = scene.clone(true);
 
+    /*
+      GLB-Materialien NICHT verändern!
+
+      Dadurch bleiben die originalen Materialien
+      des Modells erhalten.
+    */
+
     clone.traverse((child) => {
       if (child.isMesh) {
         child.castShadow = true;
         child.receiveShadow = true;
 
+        /*
+          Original-Material behalten!
+        */
         if (child.material) {
-          child.material = child.material.clone();
-          child.material.roughness = 0.8;
-          child.material.metalness = 0;
+          child.material.needsUpdate = true;
         }
       }
     });
 
     clone.updateMatrixWorld(true);
 
+    /*
+      Originalgröße berechnen
+    */
+
     const box = new THREE.Box3().setFromObject(clone);
 
-    const modelSize = new THREE.Vector3();
+    const dimensions = new THREE.Vector3();
 
-    box.getSize(modelSize);
+    box.getSize(dimensions);
 
-    const largest =
+    const largestDimension =
       Math.max(
-        modelSize.x,
-        modelSize.y,
-        modelSize.z
+        dimensions.x,
+        dimensions.y,
+        dimensions.z
       ) || 1;
 
-    const scale = size / largest;
+    /*
+      Einheitliche Skalierung
+    */
 
-    clone.scale.multiplyScalar(scale);
+    const scale =
+      size / largestDimension;
+
+    clone.scale.setScalar(scale);
 
     clone.updateMatrixWorld(true);
 
-    const newBox =
+    /*
+      Modell erneut berechnen
+    */
+
+    const scaledBox =
       new THREE.Box3().setFromObject(clone);
 
     const center =
-      newBox.getCenter(
+      scaledBox.getCenter(
         new THREE.Vector3()
       );
 
+    /*
+      Modell horizontal zentrieren
+    */
+
     clone.position.x -= center.x;
+
     clone.position.z -= center.z;
 
-    clone.position.y -= newBox.min.y;
+    /*
+      Modell auf Boden setzen
+    */
+
+    clone.position.y -=
+      scaledBox.min.y;
 
     return clone;
+
   }, [scene, size]);
 
   return (
@@ -88,24 +125,37 @@ function GLBModel({
 
 function Player({
   move,
-  playerPosition,
-  setPlayerPosition,
+  startPosition,
+  onPositionChange,
 }) {
+
   const playerRef = useRef(null);
 
   const keys = useRef({});
 
+  const lastPositionUpdate =
+    useRef(0);
 
-  /* TASTATUR */
+
+  /* =================================
+     TASTATUR
+  ================================= */
 
   useEffect(() => {
+
     const keyDown = (event) => {
+
       keys.current[event.code] = true;
+
     };
 
+
     const keyUp = (event) => {
+
       keys.current[event.code] = false;
+
     };
+
 
     window.addEventListener(
       'keydown',
@@ -117,7 +167,9 @@ function Player({
       keyUp
     );
 
+
     return () => {
+
       window.removeEventListener(
         'keydown',
         keyDown
@@ -127,15 +179,23 @@ function Player({
         'keyup',
         keyUp
       );
+
     };
+
   }, []);
 
 
+  /* =================================
+     BEWEGUNG
+  ================================= */
+
   useFrame((state, delta) => {
+
     if (!playerRef.current) return;
 
 
     let moveX = 0;
+
     let moveZ = 0;
 
 
@@ -148,6 +208,7 @@ function Player({
       moveX -= 1;
     }
 
+
     if (
       keys.current.KeyD ||
       keys.current.ArrowRight
@@ -155,12 +216,14 @@ function Player({
       moveX += 1;
     }
 
+
     if (
       keys.current.KeyW ||
       keys.current.ArrowUp
     ) {
       moveZ -= 1;
     }
+
 
     if (
       keys.current.KeyS ||
@@ -189,12 +252,15 @@ function Player({
     }
 
 
-    /* BEWEGUNG */
+    /* =================================
+       BEWEGEN
+    ================================= */
 
     if (
       moveX !== 0 ||
       moveZ !== 0
     ) {
+
       const direction =
         new THREE.Vector3(
           moveX,
@@ -203,7 +269,7 @@ function Player({
         ).normalize();
 
 
-      const speed = 4;
+      const speed = 5;
 
 
       playerRef.current.position.x +=
@@ -218,195 +284,121 @@ function Player({
         delta;
 
 
-      /* WELTGRENZE */
+      /* WELTGRENZEN */
 
       playerRef.current.position.x =
         THREE.MathUtils.clamp(
           playerRef.current.position.x,
-          -18,
-          18
+          -22,
+          22
         );
 
 
       playerRef.current.position.z =
         THREE.MathUtils.clamp(
           playerRef.current.position.z,
-          -18,
-          18
+          -22,
+          22
         );
 
 
-      /* SPIELER DREHEN */
+      /* CHARAKTER DREHEN */
 
-      playerRef.current.rotation.y =
+      const targetRotation =
         Math.atan2(
           direction.x,
           direction.z
         );
+
+      playerRef.current.rotation.y =
+        THREE.MathUtils.lerp(
+          playerRef.current.rotation.y,
+          targetRotation,
+          0.15
+        );
+
     }
 
 
-    /* POSITION AN REACT */
+    /* =================================
+       POSITION SPEICHERN
+       Nicht mehr 60x pro Sekunde!
+    ================================= */
 
-    setPlayerPosition({
-      x: playerRef.current.position.x,
-      z: playerRef.current.position.z,
-    });
+    const now =
+      performance.now();
 
 
-    /* KAMERA FOLGT */
+    if (
+      now -
+      lastPositionUpdate.current >
+      100
+    ) {
 
-    const cameraPosition =
+      onPositionChange({
+        x:
+          playerRef.current.position.x,
+
+        z:
+          playerRef.current.position.z,
+      });
+
+
+      lastPositionUpdate.current =
+        now;
+
+    }
+
+
+    /* =================================
+       KAMERA FOLGT SPIELER
+    ================================= */
+
+    const targetCameraPosition =
       new THREE.Vector3(
         playerRef.current.position.x,
-        8,
+        9,
         playerRef.current.position.z + 12
       );
 
 
     state.camera.position.lerp(
-      cameraPosition,
+      targetCameraPosition,
       1 - Math.exp(-5 * delta)
     );
 
 
     state.camera.lookAt(
       playerRef.current.position.x,
-      0.8,
+      1,
       playerRef.current.position.z
     );
+
   });
 
 
   return (
+
     <group
       ref={playerRef}
-      position={[
-        playerPosition.x,
-        0,
-        playerPosition.z,
-      ]}
+      position={startPosition}
     >
 
-      {/* =================================
-          SICHERER SICHTBARER CHARAKTER
-      ================================= */}
+      {/*
+        NUR EIN CHARAKTER!
 
-      {/* KÖRPER */}
+        Kein orangefarbener Ersatzkörper.
+      */}
 
-      <mesh
-        position={[0, 0.9, 0]}
-        castShadow
-      >
-        <capsuleGeometry
-          args={[
-            0.32,
-            0.7,
-            6,
-            12,
-          ]}
-        />
-
-        <meshStandardMaterial
-          color="#c98c55"
-        />
-      </mesh>
-
-
-      {/* KOPF */}
-
-      <mesh
-        position={[0, 1.7, 0]}
-        castShadow
-      >
-        <sphereGeometry
-          args={[
-            0.3,
-            16,
-            16,
-          ]}
-        />
-
-        <meshStandardMaterial
-          color="#e6b38a"
-        />
-      </mesh>
-
-
-      {/* AUGENRICHTUNG */}
-
-      <mesh
-        position={[0, 1.72, -0.28]}
-      >
-        <sphereGeometry
-          args={[
-            0.08,
-            10,
-            10,
-          ]}
-        />
-
-        <meshStandardMaterial
-          color="#202020"
-        />
-      </mesh>
-
-
-      {/* BEINE */}
-
-      <mesh
-        position={[-0.16, 0.3, 0]}
-        castShadow
-      >
-        <boxGeometry
-          args={[
-            0.2,
-            0.6,
-            0.2,
-          ]}
-        />
-
-        <meshStandardMaterial
-          color="#2d3945"
-        />
-      </mesh>
-
-
-      <mesh
-        position={[0.16, 0.3, 0]}
-        castShadow
-      >
-        <boxGeometry
-          args={[
-            0.2,
-            0.6,
-            0.2,
-          ]}
-        />
-
-        <meshStandardMaterial
-          color="#2d3945"
-        />
-      </mesh>
-
-
-      {/* =================================
-          GLB CHARAKTER ZUSÄTZLICH LADEN
-      ================================= */}
-
-      <Suspense fallback={null}>
-        <group
-          position={[0, 0, 0]}
-        >
-          <GLBModel
-            url="/models/character-human.glb"
-            size={1.8}
-          />
-        </group>
-      </Suspense>
+      <GLBModel
+        url="/models/character-human.glb"
+        size={2.2}
+      />
 
     </group>
+
   );
+
 }
 
 
@@ -417,20 +409,26 @@ function Player({
 function Resource({
   resource,
   playerPosition,
-  onMine,
 }) {
-  const distance = Math.sqrt(
-    Math.pow(
-      playerPosition.x -
+
+  const distance =
+    Math.sqrt(
+
+      Math.pow(
+        playerPosition.x -
         resource.x,
-      2
-    ) +
+        2
+      )
+
+      +
+
       Math.pow(
         playerPosition.z -
-          resource.z,
-      2
-    )
-  );
+        resource.z,
+        2
+      )
+
+    );
 
 
   const isNear =
@@ -438,6 +436,7 @@ function Resource({
 
 
   return (
+
     <group
       position={[
         resource.x,
@@ -451,25 +450,35 @@ function Resource({
       <GLBModel
         url={resource.model}
         size={resource.size}
+        rotation={resource.rotation || [
+          0,
+          0,
+          0,
+        ]}
       />
 
 
-      {/* LEUCHTENDER RING,
-          WENN SPIELER NAH IST */}
+      {/* MARKIERUNG WENN NAH */}
 
       {isNear && (
+
         <mesh
           rotation={[
             -Math.PI / 2,
             0,
             0,
           ]}
-          position={[0, 0.03, 0]}
+          position={[
+            0,
+            0.025,
+            0,
+          ]}
         >
+
           <ringGeometry
             args={[
-              1.2,
-              1.45,
+              1.1,
+              1.4,
               32,
             ]}
           />
@@ -477,15 +486,151 @@ function Resource({
           <meshBasicMaterial
             color={
               resource.type === 'stone'
-                ? '#a8c7ff'
-                : '#ffd38a'
+                ? '#9ec5ff'
+                : '#f3b65b'
             }
+            transparent
+            opacity={0.9}
           />
+
         </mesh>
+
       )}
 
     </group>
+
   );
+
+}
+
+
+/* =====================================================
+   DEKORATION
+===================================================== */
+
+function Decoration() {
+
+  return (
+
+    <Suspense fallback={null}>
+
+
+      {/* TOR */}
+
+      <GLBModel
+        url="/models/gate.glb"
+        position={[0, 0, -18]}
+        rotation={[
+          0,
+          Math.PI,
+          0,
+        ]}
+        size={5}
+      />
+
+
+      {/* TRUHE */}
+
+      <GLBModel
+        url="/models/chest.glb"
+        position={[-7, 0, -4]}
+        rotation={[
+          0,
+          0.5,
+          0,
+        ]}
+        size={1.8}
+      />
+
+
+      {/* FÄSSER */}
+
+      <GLBModel
+        url="/models/barrel.glb"
+        position={[-9, 0, -5]}
+        size={1.4}
+      />
+
+
+      <GLBModel
+        url="/models/barrel.glb"
+        position={[-8, 0, -6]}
+        rotation={[
+          0,
+          0.5,
+          0,
+        ]}
+        size={1.1}
+      />
+
+
+      {/* BANNER */}
+
+      <GLBModel
+        url="/models/banner.glb"
+        position={[10, 0, -10]}
+        rotation={[
+          0,
+          -0.5,
+          0,
+        ]}
+        size={3.5}
+      />
+
+
+      {/* TISCH */}
+
+      <GLBModel
+        url="/models/table.glb"
+        position={[8, 0, 8]}
+        rotation={[
+          0,
+          -0.8,
+          0,
+        ]}
+        size={2.8}
+      />
+
+
+      {/* STUHL */}
+
+      <GLBModel
+        url="/models/chair.glb"
+        position={[6.5, 0, 8]}
+        rotation={[
+          0,
+          1,
+          0,
+        ]}
+        size={1.5}
+      />
+
+
+      {/* FELSDEKORATION */}
+
+      <GLBModel
+        url="/models/stones.glb"
+        position={[15, 0, 10]}
+        size={3.5}
+      />
+
+
+      <GLBModel
+        url="/models/stones.glb"
+        position={[-16, 0, -8]}
+        rotation={[
+          0,
+          1.5,
+          0,
+        ]}
+        size={3}
+      />
+
+
+    </Suspense>
+
+  );
+
 }
 
 
@@ -498,70 +643,84 @@ function World({
   playerPosition,
   setPlayerPosition,
   resources,
-  mineResource,
 }) {
+
   return (
+
     <>
 
 
-      {/* HIMMEL */}
+      {/* =================================
+         HIMMEL
+      ================================= */}
 
       <color
         attach="background"
-        args={['#7f9d91']}
+        args={['#86a89a']}
       />
 
 
       <fog
         attach="fog"
         args={[
-          '#7f9d91',
-          28,
-          70,
+          '#86a89a',
+          35,
+          80,
         ]}
       />
 
 
       <Sky
         sunPosition={[
+          15,
+          20,
           10,
-          12,
-          8,
         ]}
-        turbidity={8}
-        rayleigh={1.5}
+        turbidity={6}
+        rayleigh={1}
+        mieCoefficient={0.003}
       />
 
 
-      {/* LICHT */}
+      {/* =================================
+         LICHT
+      ================================= */}
 
       <ambientLight
-        intensity={0.7}
+        intensity={0.8}
       />
 
 
       <hemisphereLight
         args={[
-          '#d7e7ff',
-          '#28402c',
-          0.7,
+          '#dcecff',
+          '#35523c',
+          1.2,
         ]}
       />
 
 
       <directionalLight
         position={[
-          10,
-          15,
+          12,
+          20,
           10,
         ]}
-        intensity={1.4}
+        intensity={2}
         castShadow
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
       />
 
 
       {/* =================================
-          BODEN
+         HAUPTBODEN
+
+         WICHTIG:
+         floor.glb wird NICHT verwendet!
+
+         Das war einer der Gründe für
+         die weiße kaputte Welt.
       ================================= */}
 
       <mesh
@@ -572,6 +731,7 @@ function World({
         ]}
         receiveShadow
       >
+
         <planeGeometry
           args={[
             60,
@@ -580,109 +740,102 @@ function World({
         />
 
         <meshStandardMaterial
-          color="#3d654a"
+          color="#426b4d"
           roughness={1}
         />
+
       </mesh>
 
 
       {/* =================================
-          GLB BODEN
+         ZWEITER BODENBEREICH
       ================================= */}
 
-      <Suspense fallback={null}>
-        <GLBModel
-          url="/models/floor.glb"
-          size={35}
+      <mesh
+        position={[
+          0,
+          0.01,
+          0,
+        ]}
+        rotation={[
+          -Math.PI / 2,
+          0,
+          0,
+        ]}
+      >
+
+        <circleGeometry
+          args={[
+            18,
+            64,
+          ]}
         />
-      </Suspense>
+
+        <meshStandardMaterial
+          color="#4e7a58"
+          roughness={1}
+        />
+
+      </mesh>
 
 
       {/* =================================
-          DEKORATION
+         DEKORATION
       ================================= */}
 
-      <Suspense fallback={null}>
-
-        <GLBModel
-          url="/models/gate.glb"
-          position={[8, 0, -8]}
-          rotation={[
-            0,
-            Math.PI,
-            0,
-          ]}
-          size={4}
-        />
-
-
-        <GLBModel
-          url="/models/chest.glb"
-          position={[-4, 0, -3]}
-          rotation={[
-            0,
-            0.6,
-            0,
-          ]}
-          size={1.7}
-        />
-
-
-        <GLBModel
-          url="/models/barrel.glb"
-          position={[-6, 0, -2]}
-          size={1.3}
-        />
-
-
-        <GLBModel
-          url="/models/banner.glb"
-          position={[-9, 0, 4]}
-          size={3.5}
-        />
-
-
-      </Suspense>
+      <Decoration />
 
 
       {/* =================================
-          RESSOURCEN
+         RESSOURCEN
       ================================= */}
 
       {resources.map(
         (resource) => (
+
           <Suspense
             key={resource.id}
             fallback={null}
           >
+
             <Resource
               resource={resource}
               playerPosition={
                 playerPosition
               }
-              onMine={mineResource}
             />
+
           </Suspense>
+
         )
       )}
 
 
       {/* =================================
-          SPIELER
+         SPIELER
       ================================= */}
 
-      <Player
-        move={move}
-        playerPosition={
-          playerPosition
-        }
-        setPlayerPosition={
-          setPlayerPosition
-        }
-      />
+      <Suspense fallback={null}>
+
+        <Player
+          move={move}
+          startPosition={[
+            0,
+            0,
+            8,
+          ]}
+          onPositionChange={
+            setPlayerPosition
+          }
+        />
+
+      </Suspense>
+
 
     </>
+
   );
+
 }
 
 
@@ -693,9 +846,13 @@ function World({
 export default function Home() {
 
 
+  /* =================================
+     START
+  ================================= */
+
   const [
     started,
-    setStarted
+    setStarted,
   ] = useState(false);
 
 
@@ -705,7 +862,7 @@ export default function Home() {
 
   const [
     move,
-    setMove
+    setMove,
   ] = useState({
 
     up: false,
@@ -722,7 +879,7 @@ export default function Home() {
 
   const [
     playerPosition,
-    setPlayerPosition
+    setPlayerPosition,
   ] = useState({
 
     x: 0,
@@ -737,7 +894,7 @@ export default function Home() {
 
   const [
     inventory,
-    setInventory
+    setInventory,
   ] = useState({
 
     wood: 0,
@@ -752,7 +909,7 @@ export default function Home() {
 
   const [
     message,
-    setMessage
+    setMessage,
   ] = useState(
     'Erkunde die Welt!'
   );
@@ -760,21 +917,26 @@ export default function Home() {
 
   /* =================================
      RESSOURCEN
+
+     Nur Modelle, die wirklich
+     in deinem /models Ordner liegen.
   ================================= */
 
   const [
     resources,
-    setResources
+    setResources,
   ] = useState([
 
 
-    /* STEINE */
+    /* =============================
+       STEIN
+    ============================= */
 
     {
       id: 'stone-1',
       type: 'stone',
-      x: 5,
-      z: 3,
+      x: 4,
+      z: 4,
       size: 2.5,
       model: '/models/rocks.glb',
     },
@@ -783,9 +945,9 @@ export default function Home() {
     {
       id: 'stone-2',
       type: 'stone',
-      x: -7,
-      z: 6,
-      size: 2.2,
+      x: -6,
+      z: 5,
+      size: 2.3,
       model: '/models/rocks.glb',
     },
 
@@ -794,8 +956,8 @@ export default function Home() {
       id: 'stone-3',
       type: 'stone',
       x: 9,
-      z: -2,
-      size: 2.6,
+      z: -3,
+      size: 2.5,
       model: '/models/rocks.glb',
     },
 
@@ -804,20 +966,25 @@ export default function Home() {
       id: 'stone-4',
       type: 'stone',
       x: -10,
-      z: -5,
-      size: 2.4,
+      z: -4,
+      size: 2.2,
       model: '/models/rocks.glb',
     },
 
 
-    /* HOLZ */
+    /* =============================
+       HOLZ
+
+       wood-structure.glb
+       als sammelbare Holzressource
+    ============================= */
 
     {
       id: 'wood-1',
       type: 'wood',
       x: -3,
-      z: 3,
-      size: 2.7,
+      z: 2,
+      size: 2.3,
       model:
         '/models/wood-structure.glb',
     },
@@ -826,9 +993,9 @@ export default function Home() {
     {
       id: 'wood-2',
       type: 'wood',
-      x: 4,
+      x: 6,
       z: -5,
-      size: 2.5,
+      size: 2.2,
       model:
         '/models/wood-structure.glb',
     },
@@ -837,9 +1004,9 @@ export default function Home() {
     {
       id: 'wood-3',
       type: 'wood',
-      x: 11,
+      x: 12,
       z: 6,
-      size: 2.5,
+      size: 2.2,
       model:
         '/models/wood-structure.glb',
     },
@@ -849,7 +1016,7 @@ export default function Home() {
 
 
   /* =================================
-     MOBILE BUTTON
+     MOBILE STEUERUNG
   ================================= */
 
   const press = (
@@ -857,13 +1024,16 @@ export default function Home() {
     value
   ) => {
 
-    setMove((current) => ({
+    setMove(
+      (current) => ({
 
-      ...current,
+        ...current,
 
-      [direction]: value,
+        [direction]:
+          value,
 
-    }));
+      })
+    );
 
   };
 
@@ -872,215 +1042,234 @@ export default function Home() {
     direction
   ) => ({
 
-    onPointerDown: (event) => {
+    onPointerDown:
+      (event) => {
 
-      event.preventDefault();
+        event.preventDefault();
 
-      press(
-        direction,
-        true
-      );
+        press(
+          direction,
+          true
+        );
 
-    },
-
-
-    onPointerUp: () => {
-
-      press(
-        direction,
-        false
-      );
-
-    },
+      },
 
 
-    onPointerCancel: () => {
+    onPointerUp:
+      () => {
 
-      press(
-        direction,
-        false
-      );
+        press(
+          direction,
+          false
+        );
 
-    },
+      },
 
 
-    onPointerLeave: () => {
+    onPointerCancel:
+      () => {
 
-      press(
-        direction,
-        false
-      );
+        press(
+          direction,
+          false
+        );
 
-    },
+      },
 
+
+    onPointerLeave:
+      () => {
+
+        press(
+          direction,
+          false
+        );
+
+      },
 
   });
 
 
   /* =================================
-     NÄCHSTE RESSOURCE FINDEN
+     NÄCHSTE RESSOURCE
   ================================= */
 
-  const getNearestResource = () => {
-
-    if (resources.length === 0) {
-
-      return null;
-
-    }
+  const getNearestResource =
+    () => {
 
 
-    let nearest = null;
+      if (
+        resources.length === 0
+      ) {
 
-    let nearestDistance = 999;
-
-
-    resources.forEach(
-      (resource) => {
-
-        const distance =
-          Math.sqrt(
-
-            Math.pow(
-              playerPosition.x -
-                resource.x,
-              2
-            )
-
-            +
-
-            Math.pow(
-              playerPosition.z -
-                resource.z,
-              2
-            )
-
-          );
-
-
-        if (
-          distance <
-          nearestDistance
-        ) {
-
-          nearestDistance =
-            distance;
-
-          nearest =
-            resource;
-
-        }
+        return null;
 
       }
-    );
 
 
-    return {
-      resource: nearest,
-      distance: nearestDistance,
+      let nearest =
+        null;
+
+
+      let nearestDistance =
+        Infinity;
+
+
+      resources.forEach(
+        (resource) => {
+
+          const distance =
+            Math.sqrt(
+
+              Math.pow(
+                playerPosition.x -
+                resource.x,
+                2
+              )
+
+              +
+
+              Math.pow(
+                playerPosition.z -
+                resource.z,
+                2
+              )
+
+            );
+
+
+          if (
+            distance <
+            nearestDistance
+          ) {
+
+            nearest =
+              resource;
+
+            nearestDistance =
+              distance;
+
+          }
+
+        }
+      );
+
+
+      return {
+
+        resource:
+          nearest,
+
+        distance:
+          nearestDistance,
+
+      };
+
     };
-
-  };
 
 
   /* =================================
      ABBAUEN
   ================================= */
 
-  const mineResource = () => {
-
-    const result =
-      getNearestResource();
+  const mineResource =
+    () => {
 
 
-    if (
-      !result ||
-      !result.resource
-    ) {
+      const result =
+        getNearestResource();
 
-      setMessage(
-        'Keine Ressourcen mehr!'
+
+      if (
+        !result ||
+        !result.resource
+      ) {
+
+        setMessage(
+          'Keine Ressourcen mehr!'
+        );
+
+        return;
+
+      }
+
+
+      const resource =
+        result.resource;
+
+
+      /* ZU WEIT WEG */
+
+      if (
+        result.distance >
+        3
+      ) {
+
+        setMessage(
+          'Gehe näher an eine Ressource!'
+        );
+
+        return;
+
+      }
+
+
+      /* INVENTAR */
+
+      setInventory(
+        (current) => ({
+
+          ...current,
+
+          [resource.type]:
+
+            current[
+              resource.type
+            ] + 1,
+
+        })
       );
 
-      return;
 
-    }
+      /* RESSOURCE ENTFERNEN */
 
+      setResources(
+        (current) =>
 
-    const {
-      resource,
-      distance,
-    } = result;
+          current.filter(
+            (item) =>
 
+              item.id !==
+              resource.id
+          )
 
-    /* ZU WEIT WEG */
-
-    if (distance > 3) {
-
-      setMessage(
-        'Gehe näher an eine Ressource!'
       );
 
-      return;
 
-    }
+      /* NACHRICHT */
 
+      if (
+        resource.type ===
+        'stone'
+      ) {
 
-    /* INVENTAR */
+        setMessage(
+          '+1 Stein abgebaut!'
+        );
 
-    setInventory(
-      (current) => ({
+      } else {
 
-        ...current,
+        setMessage(
+          '+1 Holz gesammelt!'
+        );
 
-        [resource.type]:
+      }
 
-          current[
-            resource.type
-          ] + 1,
-
-      })
-    );
-
-
-    /* RESSOURCE ENTFERNEN */
-
-    setResources(
-      (current) =>
-
-        current.filter(
-          (item) =>
-
-            item.id !==
-            resource.id
-        )
-
-    );
-
-
-    /* NACHRICHT */
-
-    if (
-      resource.type === 'stone'
-    ) {
-
-      setMessage(
-        '+1 Stein abgebaut!'
-      );
-
-    } else {
-
-      setMessage(
-        '+1 Holz gesammelt!'
-      );
-
-    }
-
-  };
+    };
 
 
   /* =================================
-     AKTUELLE NÄHE
+     IST SPIELER NAH?
   ================================= */
 
   const nearestResult =
@@ -1088,36 +1277,31 @@ export default function Home() {
 
 
   const nearResource =
+
     nearestResult &&
-    nearestResult.distance < 3;
+
+    nearestResult.distance <
+    3;
 
 
   return (
 
     <main
       style={{
-
         position: 'relative',
-
         width: '100vw',
-
         height: '100dvh',
-
         overflow: 'hidden',
-
         background: '#243a2d',
-
         touchAction: 'none',
-
         fontFamily:
           'Arial, sans-serif',
-
       }}
     >
 
 
       {/* =================================
-          3D SPIEL
+         3D SPIEL
       ================================= */}
 
       <Canvas
@@ -1127,38 +1311,26 @@ export default function Home() {
         dpr={[1, 1.5]}
 
         camera={{
-
           position: [
             0,
-            8,
+            9,
             20,
           ],
-
-          fov: 52,
-
+          fov: 50,
           near: 0.1,
-
           far: 120,
-
         }}
 
         gl={{
-
           antialias: true,
-
           toneMapping:
             THREE.ACESFilmicToneMapping,
-
-          toneMappingExposure:
-            1.1,
-
+          toneMappingExposure: 1,
         }}
 
       >
 
-        <Suspense
-          fallback={null}
-        >
+        <Suspense fallback={null}>
 
           <World
 
@@ -1176,10 +1348,6 @@ export default function Home() {
               resources
             }
 
-            mineResource={
-              mineResource
-            }
-
           />
 
         </Suspense>
@@ -1188,105 +1356,74 @@ export default function Home() {
 
 
       {/* =================================
-          LOGO
+         LOGO
       ================================= */}
 
       <div
         style={{
-
           position: 'absolute',
-
           top: 20,
-
           left: 20,
-
           zIndex: 10,
-
           pointerEvents: 'none',
-
           color: 'white',
-
           textShadow:
             '0 3px 10px rgba(0,0,0,.8)',
-
         }}
       >
 
         <div
           style={{
-
             fontSize: 28,
-
             fontWeight: 900,
-
             letterSpacing: 4,
-
           }}
         >
-
           ASHFALL
-
         </div>
 
 
         <div
           style={{
-
             marginTop: 4,
-
             fontSize: 16,
-
             opacity: 0.8,
-
           }}
         >
-
-          Version 0.5
-
+          Version 0.6
         </div>
 
       </div>
 
 
       {/* =================================
-          INVENTAR
+         INVENTAR
       ================================= */}
 
       {started && (
 
         <div
           style={{
-
             position: 'absolute',
-
             top: 20,
-
             right: 18,
-
             zIndex: 20,
-
             display: 'flex',
-
             gap: 8,
-
           }}
         >
 
           <div
             style={inventoryStyle}
           >
-
             🪵 {inventory.wood}
-
           </div>
 
 
           <div
             style={inventoryStyle}
           >
-
             🪨 {inventory.stone}
-
           </div>
 
         </div>
@@ -1295,42 +1432,29 @@ export default function Home() {
 
 
       {/* =================================
-          NACHRICHT
+         NACHRICHT
       ================================= */}
 
       {started && (
 
         <div
           style={{
-
             position: 'absolute',
-
-            top: 75,
-
+            top: 85,
             left: '50%',
-
             transform:
               'translateX(-50%)',
-
             zIndex: 20,
-
             background:
-              'rgba(10,18,14,.8)',
-
+              'rgba(10,18,14,.82)',
             color: 'white',
-
             padding:
               '10px 16px',
-
             borderRadius: 14,
-
             border:
               '1px solid rgba(255,255,255,.15)',
-
             fontSize: 14,
-
             whiteSpace: 'nowrap',
-
           }}
         >
 
@@ -1342,88 +1466,60 @@ export default function Home() {
 
 
       {/* =================================
-          STARTSCREEN
+         STARTSCREEN
       ================================= */}
 
       {!started && (
 
         <div
           style={{
-
             position: 'absolute',
-
             inset: 0,
-
             zIndex: 50,
-
             display: 'flex',
-
             alignItems: 'center',
-
             justifyContent: 'center',
-
             background:
-              'linear-gradient(135deg, rgba(8,13,10,.92), rgba(34,63,43,.88))',
-
+              'linear-gradient(135deg, rgba(8,13,10,.94), rgba(34,63,43,.9))',
             padding: 25,
-
           }}
         >
 
           <div
             style={{
-
               textAlign: 'center',
-
               color: 'white',
-
               maxWidth: 420,
-
             }}
           >
 
             <h1
               style={{
-
                 margin: 0,
-
                 fontSize: 48,
-
                 letterSpacing: 5,
-
               }}
             >
-
               ASHFALL
-
             </h1>
 
 
             <div
               style={{
-
                 marginTop: 8,
-
                 opacity: 0.7,
-
               }}
             >
-
               Dein Abenteuer beginnt.
-
             </div>
 
 
             <p
               style={{
-
                 margin:
                   '30px 0',
-
                 lineHeight: 1.6,
-
                 color: '#d7e5da',
-
               }}
             >
 
@@ -1442,24 +1538,16 @@ export default function Home() {
               }
 
               style={{
-
                 padding:
                   '17px 32px',
-
                 borderRadius: 14,
-
                 border:
                   '1px solid rgba(255,255,255,.25)',
-
                 background:
                   '#5f995d',
-
                 color: 'white',
-
                 fontSize: 17,
-
                 fontWeight: 800,
-
               }}
 
             >
@@ -1476,98 +1564,61 @@ export default function Home() {
 
 
       {/* =================================
-          MOBILE STEUERUNG
+         MOBILE STEUERUNG
       ================================= */}
 
       {started && (
 
         <div
           style={{
-
             position: 'absolute',
-
             bottom: 20,
-
             left: 20,
-
             zIndex: 30,
-
             display: 'grid',
-
             gridTemplateColumns:
               '62px 62px 62px',
-
             gridTemplateRows:
               '62px 62px',
-
             gap: 7,
-
           }}
         >
 
           <div />
 
 
-          {/* HOCH */}
-
           <button
-
             {...buttonEvents('up')}
-
             style={controlStyle}
-
           >
-
             ▲
-
           </button>
 
 
           <div />
 
 
-          {/* LINKS */}
-
           <button
-
             {...buttonEvents('left')}
-
             style={controlStyle}
-
           >
-
             ◀
-
           </button>
 
 
-          {/* RUNTER */}
-
           <button
-
             {...buttonEvents('down')}
-
             style={controlStyle}
-
           >
-
             ▼
-
           </button>
 
 
-          {/* RECHTS */}
-
           <button
-
             {...buttonEvents('right')}
-
             style={controlStyle}
-
           >
-
             ▶
-
           </button>
 
         </div>
@@ -1576,29 +1627,24 @@ export default function Home() {
 
 
       {/* =================================
-          ABBAUEN BUTTON
+         ABBAUEN
       ================================= */}
 
       {started && (
 
         <button
 
-          onClick={mineResource}
+          onClick={
+            mineResource
+          }
 
           style={{
-
             position: 'absolute',
-
             bottom: 28,
-
             right: 20,
-
             zIndex: 30,
-
-            width: 120,
-
-            height: 65,
-
+            width: 130,
+            height: 70,
             borderRadius: 18,
 
             border:
@@ -1611,18 +1657,16 @@ export default function Home() {
 
               nearResource
                 ? '#a8702e'
-                : 'rgba(15,24,18,.88)',
+                : 'rgba(15,24,18,.9)',
 
             color: 'white',
-
             fontWeight: 900,
-
             fontSize: 15,
 
             boxShadow:
 
               nearResource
-                ? '0 0 20px rgba(255,180,70,.35)'
+                ? '0 0 25px rgba(255,180,70,.4)'
                 : 'none',
 
           }}
@@ -1639,6 +1683,7 @@ export default function Home() {
 
       )}
 
+
     </main>
 
   );
@@ -1647,7 +1692,7 @@ export default function Home() {
 
 
 /* =====================================================
-   STYLES
+   BUTTON STYLE
 ===================================================== */
 
 const controlStyle = {
@@ -1662,45 +1707,58 @@ const controlStyle = {
     '1px solid rgba(255,255,255,.35)',
 
   background:
-    'rgba(10,24,16,.88)',
+    'rgba(10,24,16,.9)',
 
-  color: 'white',
+  color:
+    'white',
 
-  fontSize: 22,
+  fontSize:
+    22,
 
-  fontWeight: 900,
+  fontWeight:
+    900,
 
-  touchAction: 'none',
+  touchAction:
+    'none',
 
-  userSelect: 'none',
-
-};
-
-
-const inventoryStyle = {
-
-  background:
-    'rgba(10,18,14,.82)',
-
-  color: 'white',
-
-  padding:
-    '10px 13px',
-
-  borderRadius: 13,
-
-  border:
-    '1px solid rgba(255,255,255,.18)',
-
-  fontSize: 15,
-
-  fontWeight: 700,
+  userSelect:
+    'none',
 
 };
 
 
 /* =====================================================
-   MODELLE VORLADEN
+   INVENTAR STYLE
+===================================================== */
+
+const inventoryStyle = {
+
+  background:
+    'rgba(10,18,14,.85)',
+
+  color:
+    'white',
+
+  padding:
+    '10px 13px',
+
+  borderRadius:
+    13,
+
+  border:
+    '1px solid rgba(255,255,255,.18)',
+
+  fontSize:
+    15,
+
+  fontWeight:
+    700,
+
+};
+
+
+/* =====================================================
+   GLB VORLADEN
 ===================================================== */
 
 useGLTF.preload(
@@ -1712,7 +1770,11 @@ useGLTF.preload(
 );
 
 useGLTF.preload(
-  '/models/floor.glb'
+  '/models/stones.glb'
+);
+
+useGLTF.preload(
+  '/models/wood-structure.glb'
 );
 
 useGLTF.preload(
@@ -1732,5 +1794,9 @@ useGLTF.preload(
 );
 
 useGLTF.preload(
-  '/models/wood-structure.glb'
+  '/models/table.glb'
+);
+
+useGLTF.preload(
+  '/models/chair.glb'
 );
